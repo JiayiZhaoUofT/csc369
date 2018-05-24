@@ -354,9 +354,10 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
             
                 set_addr_rw(sys_call_table);
                 table[syscall].f = sys_call_table[syscall];
+                table[syscall].intercepted = 1;
                 sys_call_table[syscall] = *interceptor();
                 set_addr_ro(sys_call_table);
-
+            
                 spin_unlock(&calltable_lock); /*unclocked*/
 
         }
