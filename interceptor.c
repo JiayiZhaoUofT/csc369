@@ -351,8 +351,7 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
                         spin_unlock(&calltable_lock); /*unclocked*/
                         return -EBUSY;
                 }
-                spin_lock(&calltable_lock);/*spinlock for table*/
-
+            
                 set_addr_rw(sys_call_table);
                 table[syscall].f = sys_call_table[syscall];
                 sys_call_table[syscall] = *interceptor();
@@ -368,13 +367,11 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
                }
 
                spin_lock(&calltable_lock);/*spinlock for table*/
+            
                if(table[syscall].intercepted == 0){ /*Cannot de-intercept a system call that has not been intercepted yet.*/
-
                        spin_unlock(&calltable_lock);/*unclocked*/
                        return -EINVAL;
                }
-
-               spin_lock(&calltable_lock);/*spinlock for table*/
 
                set_addr_rw(sys_call_table);
                sys_call_table[syscall] = table[syscall].f;
@@ -391,10 +388,10 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
                     spin_unlock(&pidlist_lock);/*spin unlock for pid*/
                     return -EINVAL;
                }
-
-               if(current_uid()!= 0 && check_pid_from_list(current -> pid, pid) != 0 ){/*check if the 'pid' requested is owned by the calling process */
-                    spin_unlock(&pidlist_lock);/*spin unlock for pid*/
-                    return -EPERM;
+               /*when the calling process is not root, check  if the 'pid' requested is owned by the calling process */
+               if(current_uid()!= 0 && check_pid_from_list(current -> pid, pid) != 0 ){
+                       spin_unlock(&pidlist_lock);/*spin unlock for pid*/
+                       return -EPERM;
                }
 
                if(pid == 0 && current_uid() != 0){ /*deny the access when the pid = 0 and the uid is not root */
@@ -402,20 +399,24 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
                     return -EPERM;
                }
 
-               if(check_pid_monitored(syscall, pid) == 1){/*cannot monitor a pid that is already monitered*/
+               if(check_pid_monitored(syscall, pid) == 1 && table[syscall].monitered == 1 || check_pid_monitored(syscall,pid) == 0 && table[syscall].monitored == 2){/*cannot monitor a pid that is already monitered*/
                     spin_unlock(&pidlist_lock);/*spin unlock for pid*/
                     return -EBUSY;
                }
 
                if(pid != 0){
                     add_pid_sysc(pid, syscall);
-               }
-               spin_unlock(&pidlist_lock);/*spin unlock for pid*/
-
-
-                   else if(pid == 0){
-                        table[syscall].monitored = 2;
+                   /*change monitored to 1 if it is 0*/
+                   if(table[syscall].monitered == 0){
+                       table[syscall].monitered = 1;
                    }
+               }
+               else if(pid == 0){
+                    /*destroy the pidlist, set listcount as 0, set monitored as 0*/
+                    destroy_list(syscall);
+                    /*set monitored as 2*/
+                    table[syscall].monitored = 2;
+                }
                spin_unlock(&calltable_lock);/*unclocked*/
 
         }
@@ -441,7 +442,7 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
                 	return -EINVAL;
              }
 
-             if(check_pid_monitored(syscall, pid) == 0){/*Cannot stop monitoring for a pid that is not being monitored*/
+             if(check_pid_monitored(syscall, pid) == 0 && table[syscall].monitored == 1 || check_pid_monitored(syscall,pid) == 1 && table[syscall].monitored == 2){/*Cannot stop monitoring for a pid that is not being monitored*/
                     spin_unlock(&pidlist_lock);/*spin unlock for pid*/
                     return -EBUSY;
              }
@@ -451,7 +452,7 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
              }
              else if(pid != 0){
                     if(table[syscall].monitored == 2){
-
+                        add_pid_sysc(pid, syscall);
                     }else{
                         del_pid_sysc(pid, syscall);
                     }
