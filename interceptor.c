@@ -413,13 +413,16 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 
         }
         else if(cmd == REQUEST_START_MONITORING){
+               printk( KERN_DEBUG "interceptor %d %d %d", cmd, syscall, pid);
 
                if((check_pid_monitored(syscall, pid) == 1 && table[syscall].monitored == 1 )|| (check_pid_monitored(syscall,pid) == 0 && table[syscall].monitored == 2)){/*cannot monitor a pid that is already monitored*/
-                    
+                    printk( KERN_DEBUG "error monitor");
                     return -EBUSY;
                }
        
                spin_lock(&pidlist_lock);/*spinlock for pid*/
+               printk( KERN_DEBUG "locked");
+
                if(pid != 0){
                     add_pid_sysc(pid, syscall);
                    /*change monitored to 1 if it is 0*/
@@ -433,6 +436,8 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
                     /*set monitored as 2*/
                     table[syscall].monitored = 2;
                 }
+
+               printk( KERN_DEBUG "unlocked");
                spin_unlock(&pidlist_lock);/*unclocked*/
             
         }
