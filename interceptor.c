@@ -373,13 +373,16 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
                 return -EINVAL;
             }
             /*when the calling process is not root, check  if the 'pid' requested is owned by the calling process */
-            if(current_uid()!= 0 && check_pid_from_list(current -> pid, pid) == -EPERM ){
+           /* if(current_uid()!= 0 && check_pid_from_list(current -> pid, pid) == -EPERM ){
                 return -EPERM;
-            }
+            }*/
             /*check the permission of the last two requests*/
-            if(pid == 0 && current_uid() != 0){ /*deny the access when the pid = 0 and the uid is not root */
+         /*   if(pid == 0 && current_uid() != 0){ 
                 printk(KERN_DEBUG "root error");
                 return -EPERM;
+            }*/
+            if (current_uid() != 0 && (pid == 0 || check_pid_from_list(pid, current - > pid) == -EPERM)) {
+               return -EPERM;
             }
             
         }
