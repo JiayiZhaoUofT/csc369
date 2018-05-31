@@ -201,11 +201,10 @@ static void destroy_list(int sysc) {
  * owner of that pid is allowed to request that.
  */
 static int check_pid_from_list(pid_t pid1, pid_t pid2) {
-        
+
 	struct task_struct *p1 = pid_task(find_vpid(pid1), PIDTYPE_PID);
 	struct task_struct *p2 = pid_task(find_vpid(pid2), PIDTYPE_PID);
 	if(p1->real_cred->uid != p2->real_cred->uid)
-                printk(KERN_DEBUG "ckeck pid list -EPERM %d", pid1, pid2);
 		return -EPERM;
 	return 0;
 }
@@ -348,6 +347,7 @@ asmlinkage long interceptor(struct pt_regs reg) {
  */
 asmlinkage long my_syscall(int cmd, int syscall, int pid) {
         int indicator = 0;//trace the return value of the functions above
+       
         printk( KERN_EMERG "interceptor %d %d %d \n", cmd, syscall, pid);
 
         /*for all the commands,
@@ -363,28 +363,28 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
         if((cmd == REQUEST_SYSCALL_INTERCEPT || cmd == REQUEST_SYSCALL_RELEASE) && current_uid() != 0){
             return -EPERM;
         }
-        if(current_uid() == 0){
-            printk(KERN_DEBUG "root");
-        }
+        
         if(cmd == REQUEST_START_MONITORING || cmd == REQUEST_STOP_MONITORING){
+            if(current_uid() == 0){
+               printk(KERN_DEBUG "root");
+            }
             /*THE pid must be valid for the last two cmd*/
-            printk(KERN_DEBUG "enter");
-            if(pid < 0 ||(pid != 0 && pid_task(find_vpid(pid), PIDTYPE_PID) == NULL)){ /*the pid must be valid*/
+           
+            if(pid < 0 ||(pid != 0 && pid_task(find_vpid(pid), PIDTYPE_PID) == NULL)){ 
+                printk(KERN_DEBUG "pid invalid");
                 return -EINVAL;
             }
-            /*when the calling process is not root, check  if the 'pid' requested is owned by the calling process */
-           /* if(current_uid()!= 0 && check_pid_from_list(current -> pid, pid) == -EPERM ){
+              /*if(current_uid()!= 0 && check_pid_from_list(pid, current->pid) == -EPERM){
+                printk(KERN_DEBUG "check pid from list");
                 return -EPERM;
-            }*/
-            /*check the permission of the last two requests*/
-         /*   if(pid == 0 && current_uid() != 0){ 
-                printk(KERN_DEBUG "root error");
-                return -EPERM;
-            }*/
-            if (current_uid() != 0 && (pid == 0 || check_pid_from_list(pid, current - > pid) == -EPERM)) {
-               return -EPERM;
             }
-            
+            if(current_uid()!= 0 && pid == 0){
+                printk(KERN_DEBUG "not root pid = 0");
+                return -EPERM;
+            }*/
+            if (current_uid() != 0 && (pid == 0 || check_pid_from_list(pid, current->pid) == -EPERM)) {
+			return -EPERM;
+            }
         }
         
     
@@ -422,53 +422,75 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 
         }
         else if(cmd == REQUEST_START_MONITORING){
-               
-               if((check_pid_monitored(syscall, pid) == 1 && table[syscall].monitored == 1 )|| (check_pid_monitored(syscall,pid) == 0 && table[syscall].monitored == 2)){/*cannot monitor a pid that is already monitored*/
+                
+               if((table[syscall].monitored == 2 && table[syscall].listcount == 0)||\
+                 (check_pid_monitored(syscall, pid) == 1 && table[syscall].monitored == 1 )||\
+                 (check_pid_monitored(syscall,pid) == 0 && table[syscall].monitored == 2)){/*cannot monitor a pid that is already monitored*/
                     printk( KERN_DEBUG "error monitor");
                     return -EBUSY;
                }
        
                spin_lock(&pidlist_lock);/*spinlock for pid*/
-               printk(KERN_DEBUG "locked");
+         
 
                if(pid != 0){
-                    indicator = add_pid_sysc(pid, syscall);
-                   /*change monitored to 1 if it is 0*/
-                   if(table[syscall].monitored == 0){
-                       table[syscall].monitored = 1;
+                   if(table[syscall].monitored == 2){
+                      indicator = del_pid_sysc(pid, syscall);
+                      
                    }
-                   if(indicator != 0){
+                   
+                  indicator = add_pid_sysc(pid, syscall);
+
+                  if(indicator != 0){
                       return indicator;
-                   }
+                  }
+
+                  /*change monitored to 1 if it is 0*/
+                  if(table[syscall].monitored == 0){
+                       table[syscall].monitored = 1;
+                  }
+                   
                }
                else if(pid == 0){
-                    /*destroy the pidlist, set listcount as 0, set monitored as 0*/
-                    if(table[syscall].listcount > 0){
-                       printk(KERN_DEBUG "corner case");
-                       destroy_list(syscall);
+                    if(table[syscall].monitored == 0){
+                       table[syscall].monitored = 2;
                     }
+                    else{
+                    /*destroy the pidlist, set listcount as 0, set monitored as 0*/
+                       destroy_list(syscall);
                     /*set monitored as 2*/
-                    table[syscall].monitored = 2;
+                       table[syscall].monitored = 2;
+                    }
                 }
-               printk(KERN_DEBUG "unlocked");
-               spin_unlock(&pidlist_lock);/*unclocked*/
-            
+              
+               spin_unlock(&pidlist_lock);/*unclocked*/       
         }
         else if(cmd == REQUEST_STOP_MONITORING){
-            
+             
              if(table[syscall].intercepted == 0){/*cannot stop monitoring when the syscall is not intercepted*/
                 	
                 	return -EINVAL;
              }
 
-             if((check_pid_monitored(syscall, pid) == 0 && table[syscall].monitored == 1) || (check_pid_monitored(syscall,pid) == 1 && table[syscall].monitored == 2)){/*Cannot stop monitoring for a pid that is not being monitored*/
-                   
+             /*if((table[syscall].monitored == 0)||\
+               (check_pid_monitored(syscall,pid) == 0 && table[syscall].monitored == 1) ||\
+               (check_pid_monitored(syscall,pid) == 1 && table[syscall].monitored == 2)){   
+                    printk(KERN_DEBUG "~~~~~~~~~~~~~~~~~~~~busy~~~~~~~~~~~~~");               
+                    return -EBUSY;
+             }*/
+              if((check_pid_monitored(syscall, pid) == 0 && table[syscall].monitored == 1) || (check_pid_monitored(syscall,pid) == 1 && table[syscall].monitored == 2)){
+                    printk(KERN_DEBUG "~~~~~~~~~~~~~~~~~~~~busy~~~~~~~~~~~~~");  
                     return -EBUSY;
              }
-            
              spin_lock(&pidlist_lock);/*spinlock for pid*/
              if(pid == 0){
+                   if(table[syscall].monitored == 2 && table[syscall].listcount == 0){
+                       table[syscall].monitored = 0;
+                    }else{
+                       destroy_list(syscall);
+                    }
                     destroy_list(syscall);
+                    
              }
              else if(pid != 0){
                     if(table[syscall].monitored == 2){
